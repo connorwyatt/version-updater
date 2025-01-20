@@ -1,5 +1,6 @@
 use std::{
-    env::current_dir,
+    collections::{HashMap, VecDeque},
+    env::{args, current_dir},
     fs::{self, OpenOptions},
     io::{self, stdin, stdout, Write},
     str::FromStr,
@@ -16,11 +17,55 @@ lazy_static! {
 }
 
 fn main() {
-    let new_version = get_user_version();
+    let args = parse_arguments();
 
-    let paths = find_files(current_dir().unwrap().to_str().unwrap()).unwrap();
+    let new_version = args.new_version.unwrap_or_else(get_user_version);
+
+    let paths = find_files(&args.includes).unwrap();
 
     find_and_replace_versions_in_files(&paths, &new_version).unwrap();
+}
+
+struct Arguments {
+    new_version: Option<String>,
+    includes: Vec<String>,
+}
+
+fn parse_arguments() -> Arguments {
+    let mut raw_arguments = args().skip(1).collect::<VecDeque<_>>();
+
+    let mut positional_arguments = Vec::new();
+    let mut non_positional_arguments = HashMap::new();
+
+    while let Some(argument) = raw_arguments.pop_front() {
+        if argument.starts_with("--") {
+            let argument = argument.replacen("--", "", 1);
+
+            if let Some((k, v)) = argument.split_once("=") {
+                non_positional_arguments.insert(String::from(k), Some(String::from(v)));
+            } else {
+                non_positional_arguments.insert(argument, raw_arguments.pop_front());
+            };
+
+            break;
+        }
+
+        positional_arguments.push(argument);
+    }
+
+    Arguments {
+        new_version: positional_arguments.pop(),
+        includes: non_positional_arguments
+            .iter()
+            .filter_map(|(key, value)| {
+                if key == "include" {
+                    value.clone()
+                } else {
+                    None
+                }
+            })
+            .collect::<Vec<_>>(),
+    }
 }
 
 fn get_user_version() -> String {
@@ -53,10 +98,13 @@ fn read_user_version() -> Result<String, ()> {
     Ok(buffer)
 }
 
-fn find_files(path: &str) -> Result<Vec<String>, io::Error> {
-    let mut directories_to_check = Vec::from([path.to_string()]);
+fn find_files(includes: &[String]) -> Result<Vec<String>, io::Error> {
+    let current_dir = current_dir().unwrap();
+    let current_dir = current_dir.as_path().to_str().unwrap();
+
+    let mut directories_to_check = Vec::from([current_dir.to_string()]);
     let mut file_paths = Vec::new();
-    let working_directory = format!("{}/", current_dir()?.to_str().unwrap());
+    let working_directory = format!("{}/", current_dir);
 
     while let Some(directory) = directories_to_check.pop() {
         let directory_results = fs::read_dir(directory)?;
@@ -68,12 +116,19 @@ fn find_files(path: &str) -> Result<Vec<String>, io::Error> {
             if file_type.is_dir() {
                 directories_to_check.push(file_path);
             } else if file_type.is_file() {
-                file_paths.push(
-                    file_path
-                        .strip_prefix(&working_directory)
-                        .unwrap()
-                        .to_string(),
-                );
+                let relative_file_path = file_path
+                    .strip_prefix(&working_directory)
+                    .unwrap()
+                    .to_string();
+
+                if includes.is_empty() {
+                    file_paths.push(relative_file_path);
+                    continue;
+                }
+
+                if includes.iter().any(|i| relative_file_path.contains(i)) {
+                    file_paths.push(relative_file_path);
+                }
             }
         }
     }
