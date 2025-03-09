@@ -135,16 +135,16 @@ fn find_and_replace_versions_in_file(
         .collect::<Vec<_>>();
 
     for line_index in 0..file_lines.len() {
-        let line = file_lines
-            .get(line_index)
-            .expect("line should always be present")
-            .clone();
         let mut current_offset = 0;
 
-        while let Some(captures) = SEMVER_REGEX.captures_at(&line, current_offset) {
+        loop {
             let line = file_lines
                 .get_mut(line_index)
                 .expect("line should always be present");
+
+            let Some(captures) = SEMVER_REGEX.captures_at(&line, current_offset) else {
+                break;
+            };
 
             let whole_match = captures
                 .get(0)
@@ -204,13 +204,9 @@ fn find_and_replace_versions_in_file(
                 .write(true)
                 .truncate(true)
                 .open(path)
-                .map_err(|_| {
-                    FindAndReplaceVersionsError::UnableToSave
-                })?
+                .map_err(|_| FindAndReplaceVersionsError::UnableToSave)?
                 .write_all(file_lines.join("\n").as_bytes())
-                .map_err(|_| {
-                    FindAndReplaceVersionsError::UnableToSave
-                })?;
+                .map_err(|_| FindAndReplaceVersionsError::UnableToSave)?;
         }
     }
 
