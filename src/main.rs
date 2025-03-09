@@ -1,6 +1,5 @@
 use std::{
-    collections::{HashMap, VecDeque},
-    env::{args, current_dir},
+    env::current_dir,
     fs::{self, OpenOptions},
     io::{self, stdin, stdout, Write},
     str::FromStr,
@@ -11,61 +10,20 @@ use lazy_static::lazy_static;
 use regex::Regex;
 
 mod ansi_escape_codes;
+mod arguments;
 
 lazy_static! {
     static ref SEMVER_REGEX: Regex = Regex::from_str(r"(?P<major>0|[1-9]\d*)\.(?P<minor>0|[1-9]\d*)\.(?P<patch>0|[1-9]\d*)(?:-(?P<prerelease>(?:0|[1-9]\d*|\d*[a-zA-Z-][0-9a-zA-Z-]*)(?:\.(?:0|[1-9]\d*|\d*[a-zA-Z-][0-9a-zA-Z-]*))*))?(?:\+(?P<buildmetadata>[0-9a-zA-Z-]+(?:\.[0-9a-zA-Z-]+)*))?").unwrap();
 }
 
 fn main() {
-    let args = parse_arguments();
+    let args = arguments::parse_arguments();
 
     let new_version = args.new_version.unwrap_or_else(get_user_version);
 
     let paths = find_files(&args.includes).unwrap();
 
     find_and_replace_versions_in_files(&paths, &new_version).unwrap();
-}
-
-struct Arguments {
-    new_version: Option<String>,
-    includes: Vec<String>,
-}
-
-fn parse_arguments() -> Arguments {
-    let mut raw_arguments = args().skip(1).collect::<VecDeque<_>>();
-
-    let mut positional_arguments = Vec::new();
-    let mut non_positional_arguments = HashMap::new();
-
-    while let Some(argument) = raw_arguments.pop_front() {
-        if argument.starts_with("--") {
-            let argument = argument.replacen("--", "", 1);
-
-            if let Some((k, v)) = argument.split_once("=") {
-                non_positional_arguments.insert(String::from(k), Some(String::from(v)));
-            } else {
-                non_positional_arguments.insert(argument, raw_arguments.pop_front());
-            };
-
-            break;
-        }
-
-        positional_arguments.push(argument);
-    }
-
-    Arguments {
-        new_version: positional_arguments.pop(),
-        includes: non_positional_arguments
-            .iter()
-            .filter_map(|(key, value)| {
-                if key == "include" {
-                    value.clone()
-                } else {
-                    None
-                }
-            })
-            .collect::<Vec<_>>(),
-    }
 }
 
 fn get_user_version() -> String {
@@ -138,7 +96,7 @@ fn find_files(includes: &[String]) -> Result<Vec<String>, io::Error> {
 
 #[derive(Debug)]
 enum FindAndReplaceVersionsError {
-    UnableToSave(String),
+    UnableToSave,
 }
 
 fn find_and_replace_versions_in_files(
@@ -247,17 +205,11 @@ fn find_and_replace_versions_in_file(
                 .truncate(true)
                 .open(path)
                 .map_err(|_| {
-                    FindAndReplaceVersionsError::UnableToSave(format!(
-                        "Could not open file: {}",
-                        path
-                    ))
+                    FindAndReplaceVersionsError::UnableToSave
                 })?
                 .write_all(file_lines.join("\n").as_bytes())
                 .map_err(|_| {
-                    FindAndReplaceVersionsError::UnableToSave(format!(
-                        "Could not write to file: {}",
-                        path
-                    ))
+                    FindAndReplaceVersionsError::UnableToSave
                 })?;
         }
     }
