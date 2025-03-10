@@ -169,8 +169,8 @@ fn find_and_replace_versions_in_file(
                 let action = get_action(
                     path,
                     &(line_index + 1),
-                    &formatted_original_line,
-                    &formatted_pending_update_line,
+                    &formatted_original_line.trim_end_matches(|c| c == '\n' || c == '\r'),
+                    &formatted_pending_update_line.trim_end_matches(|c| c == '\n' || c == '\r'),
                 );
                 match action {
                     Action::Replace => true,
