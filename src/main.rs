@@ -1,7 +1,7 @@
 use std::{
     env::current_dir,
-    fs::{self, OpenOptions},
-    io::{self, stdin, stdout, Write},
+    fs::{self, File, OpenOptions},
+    io::{self, stdin, stdout, BufRead, BufReader, Write},
     str::FromStr,
 };
 
@@ -122,27 +122,26 @@ fn find_and_replace_versions_in_file(
     path: &str,
     new_version: &str,
 ) -> Result<FindAndReplaceVersionsInFileResult, FindAndReplaceVersionsError> {
-    let Ok(file_contents) = fs::read_to_string(path) else {
-        // TODO: Only return Ok if the file is not UTF8.
-        return Ok(FindAndReplaceVersionsInFileResult { should_quit: false });
-    };
+    let file = File::open(path).unwrap();
+
+    let mut reader = BufReader::new(file);
+    let mut buffer = String::new();
 
     let mut should_replace_all_in_file = false;
 
-    let mut file_lines = file_contents
-        .lines()
-        .map(|line| line.to_string())
-        .collect::<Vec<_>>();
+    let mut modified_file = String::new();
+    let mut file_modified = false;
+    let mut line_index = 0;
 
-    for line_index in 0..file_lines.len() {
+    loop {
+        buffer.clear();
+        if reader.read_line(&mut buffer).unwrap() == 0 {
+            break;
+        }
         let mut current_offset = 0;
 
         loop {
-            let line = file_lines
-                .get_mut(line_index)
-                .expect("line should always be present");
-
-            let Some(captures) = SEMVER_REGEX.captures_at(&line, current_offset) else {
+            let Some(captures) = SEMVER_REGEX.captures_at(&buffer, current_offset) else {
                 break;
             };
 
@@ -150,8 +149,8 @@ fn find_and_replace_versions_in_file(
                 .get(0)
                 .expect("capture with index 0 is guaranteed to be non-null");
 
-            let line_start = &line[..whole_match.start()];
-            let line_end = &line[whole_match.end()..];
+            let line_start = &buffer[..whole_match.start()];
+            let line_end = &buffer[whole_match.end()..];
 
             let should_replace = if should_replace_all_in_file {
                 true
@@ -194,20 +193,26 @@ fn find_and_replace_versions_in_file(
                 continue;
             }
 
+            file_modified = true;
             current_offset = whole_match.start() + new_version.len();
 
             let pending_updated_line = format!("{}{}{}", line_start, new_version, line_end);
 
-            *line = pending_updated_line;
-
-            OpenOptions::new()
-                .write(true)
-                .truncate(true)
-                .open(path)
-                .map_err(|_| FindAndReplaceVersionsError::UnableToSave)?
-                .write_all(file_lines.join("\n").as_bytes())
-                .map_err(|_| FindAndReplaceVersionsError::UnableToSave)?;
+            buffer = pending_updated_line;
         }
+
+        modified_file += buffer.as_str();
+        line_index = line_index + 1;
+    }
+
+    if file_modified {
+        OpenOptions::new()
+            .write(true)
+            .truncate(true)
+            .open(path)
+            .map_err(|_| FindAndReplaceVersionsError::UnableToSave)?
+            .write_all(modified_file.as_bytes())
+            .map_err(|_| FindAndReplaceVersionsError::UnableToSave)?;
     }
 
     Ok(FindAndReplaceVersionsInFileResult { should_quit: false })
